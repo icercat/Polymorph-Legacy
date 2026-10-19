@@ -113,6 +113,14 @@ public final class ClientGuiHandler {
                 ItemStack target = snapshot.results.get(choice.recipeIndex);
                 int token = RecipeResolver.selectionToken(target);
                 int wireSelection = token >= 0 ? token : selectedIndex;
+
+                // Optimistic client preview. The server remains authoritative,
+                // but vanilla client-side crafting recalculation must not leave
+                // the previous output visible after a Polymorph choice.
+                if (snapshot.resultSlot != null && target != null) {
+                    snapshot.resultSlot.putStack(target.copy());
+                }
+
                 IMessage message =
                         new SelectRecipeMessage(activeGui.inventorySlots.windowId, wireSelection);
                 PolymorphLegacy.NETWORK.sendToServer(message);
