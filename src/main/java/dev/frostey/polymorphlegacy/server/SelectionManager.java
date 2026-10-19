@@ -66,8 +66,12 @@ public final class SelectionManager {
             return;
         }
 
-        IRecipe recipe = RecipeResolver.findMatch(matrix, player.worldObj, recipeIndex);
+        IRecipe recipe = RecipeResolver.isSelectionToken(recipeIndex)
+                ? RecipeResolver.findMatchBySelectionToken(matrix, player.worldObj, recipeIndex)
+                : RecipeResolver.findMatch(matrix, player.worldObj, recipeIndex);
         if (recipe == null) {
+            System.out.println("[ATM0Polymorph] selection unresolved window=" + windowId
+                    + " request=" + recipeIndex);
             return;
         }
 
@@ -77,6 +81,11 @@ public final class SelectionManager {
         }
 
         boolean ae2 = CraftingAccess.isAE2CraftingContainer(container);
+        ItemStack resolvedOutput = RecipeResolver.safeResult(recipe, matrix);
+        System.out.println("[ATM0Polymorph] selection window=" + windowId
+                + " request=" + recipeIndex
+                + " resolved=" + RecipeResolver.selectionToken(resolvedOutput)
+                + " ae2=" + ae2);
         Selection selection = new Selection(
                 windowId,
                 recipeIndex,
