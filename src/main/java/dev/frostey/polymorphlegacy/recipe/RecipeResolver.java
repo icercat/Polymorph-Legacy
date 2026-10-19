@@ -25,6 +25,9 @@ public final class RecipeResolver {
                 continue;
             }
             IRecipe recipe = (IRecipe) object;
+            if (recipe == SelectionProxyRecipe.INSTANCE) {
+                continue;
+            }
             if (safeMatches(recipe, matrix, world)) {
                 ItemStack result = safeResult(recipe, matrix);
                 if (result != null) {
@@ -45,6 +48,9 @@ public final class RecipeResolver {
                 continue;
             }
             IRecipe recipe = (IRecipe) object;
+            if (recipe == SelectionProxyRecipe.INSTANCE) {
+                continue;
+            }
             if (safeMatches(recipe, matrix, world) && safeResult(recipe, matrix) != null) {
                 if (current == index) {
                     return recipe;
