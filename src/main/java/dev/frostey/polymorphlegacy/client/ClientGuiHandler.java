@@ -110,8 +110,11 @@ public final class ClientGuiHandler {
             RecipeChoiceButton choice = (RecipeChoiceButton) event.button;
             if (choice.recipeIndex < snapshot.results.size()) {
                 selectedIndex = choice.recipeIndex;
+                ItemStack target = snapshot.results.get(choice.recipeIndex);
+                int token = RecipeResolver.selectionToken(target);
+                int wireSelection = token >= 0 ? token : selectedIndex;
                 IMessage message =
-                        new SelectRecipeMessage(activeGui.inventorySlots.windowId, selectedIndex);
+                        new SelectRecipeMessage(activeGui.inventorySlots.windowId, wireSelection);
                 PolymorphLegacy.NETWORK.sendToServer(message);
                 menuOpen = false;
             }
