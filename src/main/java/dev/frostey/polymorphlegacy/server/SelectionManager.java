@@ -92,9 +92,7 @@ public final class SelectionManager {
         }
 
         container.onCraftMatrixChanged(matrix);
-        if (ae2) {
-            applyAE2Output(player, container, matrix, selection);
-        }
+        applySelectedOutput(container, matrix, selection);
         container.detectAndSendChanges();
     }
 
@@ -205,13 +203,18 @@ public final class SelectionManager {
                 return;
             }
             primeAE2RecipeCache();
-            applyAE2Output(player, container, matrix, selection);
         } else if (matrix != selection.matrix) {
             clear(player);
+            return;
         }
+
+        // Keep the real result slot aligned with the selected recipe on both
+        // vanilla and AE2 paths. Native container recalculation can otherwise
+        // overwrite the chosen output before the next sync.
+        applySelectedOutput(container, matrix, selection);
     }
 
-    private void applyAE2Output(EntityPlayerMP player, Container container,
+    private void applySelectedOutput(Container container,
             InventoryCrafting matrix, Selection selection) {
         Slot output = CraftingAccess.findActualResultSlot(container);
         if (output == null) {
