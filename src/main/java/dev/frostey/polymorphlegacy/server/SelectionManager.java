@@ -7,8 +7,8 @@ import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.inventory.Container;
 import net.minecraft.inventory.InventoryCrafting;
 import net.minecraft.inventory.SlotCrafting;
-import net.minecraft.item.ItemStack;
 import net.minecraft.item.crafting.IRecipe;
+import net.minecraft.world.World;
 import dev.frostey.polymorphlegacy.recipe.CraftingAccess;
 import dev.frostey.polymorphlegacy.recipe.RecipeResolver;
 
@@ -17,6 +17,9 @@ public final class SelectionManager {
 
     private final Map<EntityPlayerMP, Selection> selections =
             new WeakHashMap<EntityPlayerMP, Selection>();
+
+    private final Map<InventoryCrafting, Selection> matrixSelections =
+            new WeakHashMap<InventoryCrafting, Selection>();
 
     private final Map<EntityPlayerMP, PendingSelection> pendingSelections =
             new WeakHashMap<EntityPlayerMP, PendingSelection>();
@@ -39,20 +42,21 @@ public final class SelectionManager {
         }
     }
 
-    private void select(EntityPlayerMP player, int windowId, int recipeIndex) {
+    private synchronized void select(EntityPlayerMP player, int windowId, int recipeIndex) {
         if (player == null || recipeIndex < 0) {
             return;
         }
 
         Container container = player.openContainer;
         if (container == null || container.windowId != windowId) {
+            clear(player);
             return;
         }
 
         InventoryCrafting matrix = CraftingAccess.findMatrix(container);
         SlotCrafting output = CraftingAccess.findResultSlot(container);
         if (matrix == null || output == null) {
-            selections.remove(player);
+            clear(player);
             return;
         }
 
@@ -61,50 +65,75 @@ public final class SelectionManager {
             return;
         }
 
-        selections.put(player, new Selection(windowId, recipeIndex, RecipeResolver.fingerprint(matrix), recipe));
-        apply(player);
+        Selection previous = selections.get(player);
+        if (previous != null) {
+            matrixSelections.remove(previous.matrix);
+        }
+
+        Selection selection = new Selection(
+                windowId,
+                recipeIndex,
+                RecipeResolver.fingerprint(matrix),
+                matrix,
+                recipe);
+        selections.put(player, selection);
+        matrixSelections.put(matrix, selection);
+
+        container.onCraftMatrixChanged(matrix);
+        container.detectAndSendChanges();
     }
 
-    public void apply(EntityPlayerMP player) {
+    public synchronized IRecipe getSelectedRecipe(InventoryCrafting matrix, World world) {
+        if (matrix == null) {
+            return null;
+        }
+
+        Selection selection = matrixSelections.get(matrix);
+        if (selection == null) {
+            return null;
+        }
+
+        if (RecipeResolver.fingerprint(matrix) != selection.fingerprint) {
+            matrixSelections.remove(matrix);
+            return null;
+        }
+
+        if (world != null && !RecipeResolver.safeMatches(selection.recipe, matrix, world)) {
+            matrixSelections.remove(matrix);
+            return null;
+        }
+
+        return selection.recipe;
+    }
+
+    public synchronized void apply(EntityPlayerMP player) {
+        if (player == null) {
+            return;
+        }
+
         Selection selection = selections.get(player);
-        if (selection == null || player == null) {
+        if (selection == null) {
             return;
         }
 
         Container container = player.openContainer;
         if (container == null || container.windowId != selection.windowId) {
-            selections.remove(player);
+            clear(player);
             return;
         }
 
         InventoryCrafting matrix = CraftingAccess.findMatrix(container);
-        SlotCrafting output = CraftingAccess.findResultSlot(container);
-        if (matrix == null || output == null) {
-            selections.remove(player);
-            return;
+        if (matrix == null || matrix != selection.matrix
+                || RecipeResolver.fingerprint(matrix) != selection.fingerprint
+                || !RecipeResolver.safeMatches(selection.recipe, matrix, player.worldObj)) {
+            clear(player);
         }
+    }
 
-        int fingerprint = RecipeResolver.fingerprint(matrix);
-        if (fingerprint != selection.fingerprint) {
-            selections.remove(player);
-            return;
-        }
-
-        IRecipe recipe = selection.recipe;
-        if (recipe == null || !RecipeResolver.safeMatches(recipe, matrix, player.worldObj)) {
-            selections.remove(player);
-            return;
-        }
-
-        ItemStack expected = RecipeResolver.safeResult(recipe, matrix);
-        if (expected == null) {
-            selections.remove(player);
-            return;
-        }
-
-        if (!ItemStack.areItemStacksEqual(output.getStack(), expected)) {
-            output.putStack(expected.copy());
-            container.detectAndSendChanges();
+    private void clear(EntityPlayerMP player) {
+        Selection removed = selections.remove(player);
+        if (removed != null) {
+            matrixSelections.remove(removed.matrix);
         }
     }
 
@@ -122,12 +151,14 @@ public final class SelectionManager {
         final int windowId;
         final int recipeIndex;
         final int fingerprint;
+        final InventoryCrafting matrix;
         final IRecipe recipe;
 
-        Selection(int windowId, int recipeIndex, int fingerprint, IRecipe recipe) {
+        Selection(int windowId, int recipeIndex, int fingerprint, InventoryCrafting matrix, IRecipe recipe) {
             this.windowId = windowId;
             this.recipeIndex = recipeIndex;
             this.fingerprint = fingerprint;
+            this.matrix = matrix;
             this.recipe = recipe;
         }
     }
