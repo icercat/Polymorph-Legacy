@@ -41,7 +41,7 @@ The output jar should be under `build/libs/`.
 
 Remove/disable `NoMoreRecipeConflict-1.7.10-0.3.2.jar` while testing to avoid two mods fighting over the same result slot/UI.
 
-Put the built `ATM0-Polymorph-Legacy-0.1.3-exp3.jar` in both client and server `mods/` folders.
+Put the built `ATM0-Polymorph-Legacy-0.1.4-exp4.jar` in both client and server `mods/` folders.
 
 ## Next target
 
