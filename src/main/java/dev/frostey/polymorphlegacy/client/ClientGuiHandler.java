@@ -19,14 +19,14 @@ import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.renderer.entity.RenderItem;
 import net.minecraft.inventory.Container;
 import net.minecraft.inventory.InventoryCrafting;
-import net.minecraft.inventory.SlotCrafting;
+import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.crafting.IRecipe;
 import net.minecraftforge.client.event.GuiScreenEvent;
 
 /**
  * Polymorph-like chooser injected into any GuiContainer exposing a normal
- * InventoryCrafting + SlotCrafting pair.
+ * InventoryCrafting + crafting result pair, including the AE2 adapter.
  */
 public final class ClientGuiHandler {
     public static final ClientGuiHandler INSTANCE = new ClientGuiHandler();
@@ -121,7 +121,7 @@ public final class ClientGuiHandler {
         Minecraft mc = Minecraft.getMinecraft();
         Container container = activeGui.inventorySlots;
         InventoryCrafting matrix = CraftingAccess.findMatrix(container);
-        SlotCrafting resultSlot = CraftingAccess.findResultSlot(container);
+        Slot resultSlot = CraftingAccess.findResultSlot(container);
         if (matrix == null || resultSlot == null || mc.theWorld == null) {
             snapshot = Snapshot.EMPTY;
             return;
@@ -188,7 +188,7 @@ public final class ClientGuiHandler {
         int visible = Math.min(snapshot.results.size(), MAX_CHOICES);
         int columns = (visible + CHOICES_PER_COLUMN - 1) / CHOICES_PER_COLUMN;
         int totalWidth = columns * (CHOICE_WIDTH + 2);
-        int startX = toggleButton.xPosition + toggleButton.width + 2;
+        int startX = toggleButton.xPosition + 18 + 2;
         if (startX + totalWidth > activeGui.width) {
             startX = resultX - totalWidth - 5;
         }
@@ -230,10 +230,10 @@ public final class ClientGuiHandler {
 
     private static final class Snapshot {
         static final Snapshot EMPTY = new Snapshot(null, Collections.<ItemStack>emptyList());
-        final SlotCrafting resultSlot;
+        final Slot resultSlot;
         final List<ItemStack> results;
 
-        Snapshot(SlotCrafting resultSlot, List<ItemStack> results) {
+        Snapshot(Slot resultSlot, List<ItemStack> results) {
             this.resultSlot = resultSlot;
             this.results = results;
         }
@@ -282,7 +282,7 @@ public final class ClientGuiHandler {
             if (selected) {
                 name = "> " + name;
             }
-            name = mc.fontRenderer.trimStringToWidth(name, width - 24);
+            name = mc.fontRenderer.trimStringToWidth(name, CHOICE_WIDTH - 24);
             int color = enabled ? 0xE0E0E0 : 0xA0A0A0;
             mc.fontRenderer.drawStringWithShadow(name, xPosition + 23, yPosition + 6, color);
         }
