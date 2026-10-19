@@ -60,11 +60,6 @@ public final class ClientGuiHandler {
         GuiContainer gui = (GuiContainer) event.gui;
         Container container = gui.inventorySlots;
 
-        if (isSpecialCraftingGui(gui, container)) {
-            reset();
-            return;
-        }
-
         if (CraftingAccess.findMatrix(container) == null || CraftingAccess.findResultSlot(container) == null) {
             reset();
             return;
@@ -210,20 +205,6 @@ public final class ClientGuiHandler {
             button.stack = snapshot.results.get(i);
             button.selected = i == selectedIndex;
         }
-    }
-
-    private static boolean isSpecialCraftingGui(GuiContainer gui, Container container) {
-        String guiName = gui == null ? "" : gui.getClass().getName().toLowerCase();
-        String containerName = container == null ? "" : container.getClass().getName().toLowerCase();
-
-        if (guiName.startsWith("appeng.") || containerName.startsWith("appeng.")) {
-            return true;
-        }
-        if (guiName.contains("craftingterminal") || guiName.contains("craftingterm")
-                || containerName.contains("craftingterminal") || containerName.contains("craftingterm")) {
-            return true;
-        }
-        return false;
     }
 
     private static int getGuiLeft(GuiContainer gui) {
