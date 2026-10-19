@@ -3,12 +3,15 @@ package dev.frostey.polymorphlegacy;
 import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.SidedProxy;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
+import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.network.NetworkRegistry;
 import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
 import cpw.mods.fml.relauncher.Side;
 import dev.frostey.polymorphlegacy.network.SelectRecipeHandler;
 import dev.frostey.polymorphlegacy.network.SelectRecipeMessage;
 import dev.frostey.polymorphlegacy.proxy.CommonProxy;
+import dev.frostey.polymorphlegacy.recipe.SelectionProxyRecipe;
+import net.minecraft.item.crafting.CraftingManager;
 
 @Mod(
         modid = PolymorphLegacy.MOD_ID,
@@ -34,5 +37,12 @@ public final class PolymorphLegacy {
     public void preInit(FMLPreInitializationEvent event) {
         NETWORK.registerMessage(SelectRecipeHandler.class, SelectRecipeMessage.class, 0, Side.SERVER);
         proxy.registerHandlers();
+    }
+
+    @Mod.EventHandler
+    public void postInit(FMLPostInitializationEvent event) {
+        if (!CraftingManager.getInstance().getRecipeList().contains(SelectionProxyRecipe.INSTANCE)) {
+            CraftingManager.getInstance().getRecipeList().add(0, SelectionProxyRecipe.INSTANCE);
+        }
     }
 }
