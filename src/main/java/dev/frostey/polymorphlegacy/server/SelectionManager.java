@@ -82,10 +82,13 @@ public final class SelectionManager {
 
         boolean ae2 = CraftingAccess.isAE2CraftingContainer(container);
         ItemStack resolvedOutput = RecipeResolver.safeResult(recipe, matrix);
+        int beforeOutput = RecipeResolver.selectionToken(output.getStack());
         System.out.println("[ATM0Polymorph] selection window=" + windowId
                 + " request=" + recipeIndex
                 + " resolved=" + RecipeResolver.selectionToken(resolvedOutput)
-                + " ae2=" + ae2);
+                + " before=" + beforeOutput
+                + " ae2=" + ae2
+                + " container=" + container.getClass().getName());
         Selection selection = new Selection(
                 windowId,
                 recipeIndex,
@@ -101,7 +104,12 @@ public final class SelectionManager {
         }
 
         container.onCraftMatrixChanged(matrix);
-        applySelectedOutput(container, matrix, selection);
+        int afterNative = RecipeResolver.selectionToken(output.getStack());
+        applySelectedOutput(container, matrix, selection, "select");
+        int afterApply = RecipeResolver.selectionToken(output.getStack());
+        System.out.println("[ATM0Polymorph] output-select native=" + afterNative
+                + " final=" + afterApply
+                + " expected=" + RecipeResolver.selectionToken(resolvedOutput));
         container.detectAndSendChanges();
     }
 
@@ -220,11 +228,19 @@ public final class SelectionManager {
         // Keep the real result slot aligned with the selected recipe on both
         // vanilla and AE2 paths. Native container recalculation can otherwise
         // overwrite the chosen output before the next sync.
-        applySelectedOutput(container, matrix, selection);
+        applySelectedOutput(container, matrix, selection, "tick");
+        if (selection.debugTicks < 3) {
+            Slot output = CraftingAccess.findActualResultSlot(container);
+            ItemStack expected = RecipeResolver.safeResult(selection.recipe, matrix);
+            System.out.println("[ATM0Polymorph] output-tick n=" + selection.debugTicks
+                    + " actual=" + RecipeResolver.selectionToken(output == null ? null : output.getStack())
+                    + " expected=" + RecipeResolver.selectionToken(expected));
+            selection.debugTicks++;
+        }
     }
 
     private void applySelectedOutput(Container container,
-            InventoryCrafting matrix, Selection selection) {
+            InventoryCrafting matrix, Selection selection, String phase) {
         Slot output = CraftingAccess.findActualResultSlot(container);
         if (output == null) {
             return;
@@ -233,9 +249,15 @@ public final class SelectionManager {
         if (expected == null) {
             return;
         }
-        if (!ItemStack.areItemStacksEqual(output.getStack(), expected)) {
+        ItemStack before = output.getStack();
+        if (!ItemStack.areItemStacksEqual(before, expected)) {
+            int beforeToken = RecipeResolver.selectionToken(before);
             output.putStack(expected.copy());
             container.detectAndSendChanges();
+            System.out.println("[ATM0Polymorph] output-write phase=" + phase
+                    + " before=" + beforeToken
+                    + " after=" + RecipeResolver.selectionToken(output.getStack())
+                    + " expected=" + RecipeResolver.selectionToken(expected));
         }
     }
 
@@ -280,6 +302,7 @@ public final class SelectionManager {
         final InventoryCrafting matrix;
         final IRecipe recipe;
         final boolean ae2;
+        int debugTicks;
 
         Selection(int windowId, int recipeIndex, int fingerprint,
                 InventoryCrafting matrix, IRecipe recipe, boolean ae2) {
