@@ -76,30 +76,17 @@ public final class CraftingAccess {
         return null;
     }
 
-    public static SlotCrafting findResultSlot(Container container) {
+    public static Slot findResultSlot(Container container) {
         if (container == null) {
             return null;
         }
         for (Object object : container.inventorySlots) {
             if (object instanceof SlotCrafting) {
-                return (SlotCrafting) object;
+                return (Slot) object;
             }
         }
 
-        Slot actual = findAE2ResultSlot(container);
-        if (actual != null) {
-            InventoryCrafting matrix = buildAE2Matrix(container);
-            if (matrix != null) {
-                return new SlotCrafting(
-                        null,
-                        matrix,
-                        actual.inventory,
-                        0,
-                        actual.xDisplayPosition,
-                        actual.yDisplayPosition);
-            }
-        }
-        return null;
+        return findAE2ResultSlot(container);
     }
 
     public static Slot findActualResultSlot(Container container) {
