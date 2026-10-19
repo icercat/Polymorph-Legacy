@@ -12,6 +12,9 @@ import net.minecraft.item.crafting.IRecipe;
 import net.minecraft.world.World;
 
 public final class RecipeResolver {
+    private static final int OUTPUT_TOKEN_FLAG = 0x40000000;
+    private static final int OUTPUT_TOKEN_MASK = 0x7FFF;
+
     private RecipeResolver() {}
 
     public static List<IRecipe> findMatches(InventoryCrafting matrix, World world) {
@@ -56,6 +59,59 @@ public final class RecipeResolver {
                     return recipe;
                 }
                 current++;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Encodes the visible output identity into one positive int so the existing
+     * 1.7.10 packet ABI can carry a stable selection across client/server even
+     * when their recipe-list ordering differs.
+     */
+    public static int selectionToken(ItemStack stack) {
+        if (stack == null || stack.getItem() == null) {
+            return -1;
+        }
+        int itemId = Item.getIdFromItem(stack.getItem());
+        int damage = stack.getItemDamage();
+        if (itemId < 0 || itemId > OUTPUT_TOKEN_MASK || damage < 0 || damage > OUTPUT_TOKEN_MASK) {
+            return -1;
+        }
+        return OUTPUT_TOKEN_FLAG | (itemId << 15) | damage;
+    }
+
+    public static boolean isSelectionToken(int value) {
+        return value >= 0 && (value & OUTPUT_TOKEN_FLAG) != 0;
+    }
+
+    public static IRecipe findMatchBySelectionToken(
+            InventoryCrafting matrix, World world, int token) {
+        if (!isSelectionToken(token) || matrix == null || world == null) {
+            return null;
+        }
+
+        int targetItemId = (token >>> 15) & OUTPUT_TOKEN_MASK;
+        int targetDamage = token & OUTPUT_TOKEN_MASK;
+
+        for (Object object : CraftingManager.getInstance().getRecipeList()) {
+            if (!(object instanceof IRecipe)) {
+                continue;
+            }
+            IRecipe recipe = (IRecipe) object;
+            if (recipe == SelectionProxyRecipe.INSTANCE) {
+                continue;
+            }
+            if (!safeMatches(recipe, matrix, world)) {
+                continue;
+            }
+            ItemStack result = safeResult(recipe, matrix);
+            if (result == null || result.getItem() == null) {
+                continue;
+            }
+            if (Item.getIdFromItem(result.getItem()) == targetItemId
+                    && result.getItemDamage() == targetDamage) {
+                return recipe;
             }
         }
         return null;
