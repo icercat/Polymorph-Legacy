@@ -7,6 +7,7 @@ import java.util.List;
 import org.lwjgl.opengl.GL11;
 
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
+import cpw.mods.fml.common.network.simpleimpl.IMessage;
 import cpw.mods.fml.relauncher.ReflectionHelper;
 import dev.frostey.polymorphlegacy.PolymorphLegacy;
 import dev.frostey.polymorphlegacy.network.SelectRecipeMessage;
@@ -109,8 +110,9 @@ public final class ClientGuiHandler {
             RecipeChoiceButton choice = (RecipeChoiceButton) event.button;
             if (choice.recipeIndex < snapshot.results.size()) {
                 selectedIndex = choice.recipeIndex;
-                PolymorphLegacy.NETWORK.sendToServer(
-                        new SelectRecipeMessage(activeGui.inventorySlots.windowId, selectedIndex));
+                IMessage message =
+                        new SelectRecipeMessage(activeGui.inventorySlots.windowId, selectedIndex);
+                PolymorphLegacy.NETWORK.sendToServer(message);
                 menuOpen = false;
             }
             event.setCanceled(true);
