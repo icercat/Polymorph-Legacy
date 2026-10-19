@@ -41,7 +41,7 @@ The output jar should be under `build/libs/`.
 
 Remove/disable `NoMoreRecipeConflict-1.7.10-0.3.2.jar` while testing to avoid two mods fighting over the same result slot/UI.
 
-Put the built `ATM0-Polymorph-Legacy-0.1.5-exp5.jar` in both client and server `mods/` folders.
+Put the built `ATM0-Polymorph-Legacy-0.1.6-exp6-ae1.jar` in both client and server `mods/` folders.
 
 ## Next target
 
@@ -52,3 +52,17 @@ For V0.2:
 - hover tooltips
 - selected-result persistence keyed by conflict set rather than only current matrix
 - NEI integration
+
+
+## AE2 experimental support
+
+Version `0.1.6-exp6-ae1` adds an experimental adapter for GTNH AE2 crafting terminals.
+
+- Detects AE2 `SlotCraftingMatrix` / `SlotCraftingTerm` by runtime class hierarchy without a hard AE2 dependency.
+- Mirrors the 3x3 AE crafting grid into a temporary `InventoryCrafting` for conflict discovery.
+- Keeps the normal global proxy recipe restricted to conventional crafting matrices.
+- For AE2 actual crafting, temporarily primes `appeng.util.Platform.lastUsedRecipe` with an AE-only proxy that delegates `matches` and `getCraftingResult` to the selected real recipe.
+- Re-applies the selected output to the AE result slot server-side so the terminal preview matches the recipe that AE2 will craft.
+- Ambiguous simultaneous AE selections return no override rather than deliberately choosing another player's recipe.
+
+This is an experimental compatibility layer for the GTNH AE2 rv3 line. If a future AE2 build removes or renames `Platform.lastUsedRecipe`, the compatibility layer will need a direct adapter/transformer.
