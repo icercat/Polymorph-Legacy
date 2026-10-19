@@ -1,8 +1,11 @@
 package dev.frostey.polymorphlegacy;
 
+import java.util.List;
+
 import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.SidedProxy;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
+import cpw.mods.fml.common.event.FMLLoadCompleteEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.network.NetworkRegistry;
 import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
@@ -41,8 +44,20 @@ public final class PolymorphLegacy {
 
     @Mod.EventHandler
     public void postInit(FMLPostInitializationEvent event) {
-        if (!CraftingManager.getInstance().getRecipeList().contains(SelectionProxyRecipe.INSTANCE)) {
-            CraftingManager.getInstance().getRecipeList().add(0, SelectionProxyRecipe.INSTANCE);
-        }
+        ensureSelectionProxyFirst();
+    }
+
+    @Mod.EventHandler
+    public void loadComplete(FMLLoadCompleteEvent event) {
+        // Forge 1.7.10 RecipeSorter runs during Forge's LoadComplete handler,
+        // after mod postInit. Re-assert priority after that sort has finished.
+        ensureSelectionProxyFirst();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void ensureSelectionProxyFirst() {
+        List<Object> recipes = CraftingManager.getInstance().getRecipeList();
+        recipes.remove(SelectionProxyRecipe.INSTANCE);
+        recipes.add(0, SelectionProxyRecipe.INSTANCE);
     }
 }
