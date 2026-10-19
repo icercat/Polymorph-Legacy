@@ -3,7 +3,7 @@
     "modid": "atm0polymorph",
     "name": "ATM0 Polymorph Legacy",
     "description": "Polymorph-style crafting conflict selector for Minecraft 1.7.10.",
-    "version": "0.1.13-exp13-vanilla1",
+    "version": "0.1.14-exp14-sortfix",
     "mcversion": "1.7.10",
     "url": "",
     "updateUrl": "",
