@@ -35,6 +35,7 @@ import net.minecraft.world.World;
 
 import net.minecraftforge.oredict.ShapedOreRecipe;
 import net.minecraftforge.oredict.ShapelessOreRecipe;
+import net.minecraftforge.common.config.Configuration;
 
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.Mod;
@@ -42,6 +43,9 @@ import cpw.mods.fml.common.Mod.EventHandler;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartedEvent;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
+import cpw.mods.fml.common.event.FMLServerStoppingEvent;
+import cpw.mods.fml.common.eventhandler.SubscribeEvent;
+import cpw.mods.fml.common.gameevent.TickEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -62,6 +66,11 @@ public final class RecipeConflictScannerMod {
     private static final int MAX_SAMPLES_PER_RECIPE = 512;
 
     private static File reportDirectory;
+    private static ScanJob activeScan;
+    private static boolean autoScan;
+    private static int tickBudgetMillis;
+    private static int maxMatrices;
+    private static int startupDelay = -1;
 
     @EventHandler
     public void preInit(FMLPreInitializationEvent event) {
@@ -69,6 +78,16 @@ public final class RecipeConflictScannerMod {
         if (!reportDirectory.exists()) {
             reportDirectory.mkdirs();
         }
+        Configuration config = new Configuration(new File(reportDirectory, "scanner.cfg"));
+        config.load();
+        autoScan = config.getBoolean("autoScanOnStartup", "scan", false,
+            "Opt in to a delayed incremental startup scan. Default false keeps startup free of recipe scans.");
+        tickBudgetMillis = config.getInt("tickBudgetMillis", "scan", 2, 1, 10,
+            "Soft budget per server tick. A third-party recipe call cannot be interrupted safely.");
+        maxMatrices = config.getInt("maxUniqueMatrices", "scan", 25000, 100, 1000000,
+            "Bound sample memory. Hitting this limit marks the report as incomplete.");
+        config.save();
+        FMLCommonHandler.instance().bus().register(new TickHandler());
     }
 
     @EventHandler
@@ -78,13 +97,42 @@ public final class RecipeConflictScannerMod {
 
     @EventHandler
     public void serverStarted(FMLServerStartedEvent event) {
-        ScanResult result = scan(FMLCommonHandler.instance().getMinecraftServerInstance());
-        if (writeReport(result)) {
-            LOG.info("Scanned {} recipes: {} conflict groups. Report: {}",
-                result.totalRecipes, result.conflicts.size(),
-                new File(reportDirectory, "conflicts.txt").getAbsolutePath());
-        } else {
-            LOG.error("Could not write recipe conflict report");
+        activeScan = null;
+        startupDelay = autoScan ? 100 : -1;
+        LOG.info("Recipe scanner ready. Startup scan {}. Use /recipeconflicts start, status or cancel.",
+            autoScan ? "scheduled after 100 ticks" : "disabled (default)");
+    }
+
+    @EventHandler
+    public void serverStopping(FMLServerStoppingEvent event) {
+        if (activeScan != null) activeScan.cancel();
+        activeScan = null;
+        startupDelay = -1;
+    }
+
+    public static final class TickHandler {
+        @SubscribeEvent
+        public void tick(TickEvent.ServerTickEvent event) {
+            if (event.phase != TickEvent.Phase.END) return;
+            if (startupDelay > 0 && --startupDelay == 0 && activeScan == null) {
+                activeScan = new ScanJob(FMLCommonHandler.instance().getMinecraftServerInstance());
+            }
+            ScanJob job = activeScan;
+            if (job == null) return;
+            try {
+                if (job.advance()) {
+                    ScanResult result = job.result();
+                    boolean written = writeReport(result);
+                    LOG.info("Scanned {} recipes: {} conflict groups. Report {}: {}",
+                        result.totalRecipes, result.conflicts.size(), written ? "written" : "FAILED",
+                        new File(reportDirectory, "conflicts.txt").getAbsolutePath());
+                    activeScan = null;
+                }
+            } catch (RuntimeException error) {
+                job.cancel();
+                LOG.error("Recipe scan aborted; previous report retained", error);
+                activeScan = null;
+            }
         }
     }
 
@@ -97,7 +145,7 @@ public final class RecipeConflictScannerMod {
 
         @Override
         public String getCommandUsage(ICommandSender sender) {
-            return "/recipeconflicts - rescan crafting recipe conflicts";
+            return "/recipeconflicts [start|status|cancel]";
         }
 
         @Override
@@ -107,120 +155,218 @@ public final class RecipeConflictScannerMod {
 
         @Override
         public void processCommand(ICommandSender sender, String[] args) {
-            sender.addChatMessage(new ChatComponentText("[RecipeConflictScanner] Scanning..."));
-
-            ScanResult result = scan(FMLCommonHandler.instance().getMinecraftServerInstance());
-            boolean written = writeReport(result);
-
-            sender.addChatMessage(new ChatComponentText(
-                "[RecipeConflictScanner] " + result.conflicts.size() + " conflict groups, "
-                    + result.conflictingRecipeCount + " recipes involved. Report "
-                    + (written ? "written." : "FAILED.")));
+            String action = args.length == 0 ? "start" : args[0];
+            String message;
+            if ("cancel".equalsIgnoreCase(action)) {
+                message = activeScan == null ? "No scan is running." : "Scan cancelled; previous report retained.";
+                if (activeScan != null) activeScan.cancel();
+                activeScan = null;
+                startupDelay = -1;
+            } else if ("status".equalsIgnoreCase(action)) {
+                message = activeScan == null ? "No scan is running. Report: config/RecipeConflictScanner/conflicts.txt"
+                    : activeScan.status();
+            } else if ("start".equalsIgnoreCase(action)) {
+                startupDelay = -1;
+                if (activeScan == null) {
+                    activeScan = new ScanJob(FMLCommonHandler.instance().getMinecraftServerInstance());
+                    message = "Incremental scan started. Use /recipeconflicts status or cancel.";
+                } else message = "Scan already running. " + activeScan.status();
+            } else message = getCommandUsage(sender);
+            sender.addChatMessage(new ChatComponentText("[RecipeConflictScanner] " + message));
         }
     }
 
-    private static ScanResult scan(MinecraftServer server) {
-        long started = System.currentTimeMillis();
+    // Snapshot filtering runs on a worker. Live recipe calls stay on server ticks.
+    private static final class ScanJob {
+        private final long started = System.currentTimeMillis();
+        private long lastProgress = started;
+        private final List<IRecipe> recipes = new ArrayList<IRecipe>();
+        private final Map<IRecipe, Integer> recipeIndices = new IdentityHashMap<IRecipe, Integer>();
+        private final Map<String, ItemStack[]> uniqueSamples = new LinkedHashMap<String, ItemStack[]>();
+        private final List<ItemStack[]> samples = new ArrayList<ItemStack[]>();
+        private final List<long[]> sampleTokens = new ArrayList<long[]>();
+        private final SnapshotMatcher.Rule[] rules;
+        private SnapshotMatcher worker;
+        private Thread workerThread;
+        private int[] candidates;
+        private final Set<String> unsupported = new LinkedHashSet<String>();
+        private final Set<String> warnings = new LinkedHashSet<String>();
+        private final Set<IRecipe> disabled = Collections.newSetFromMap(new IdentityHashMap<IRecipe, Boolean>());
+        private final Map<String, ConflictGroup> groups = new LinkedHashMap<String, ConflictGroup>();
+        private final Set<IRecipe> conflicting = Collections.newSetFromMap(new IdentityHashMap<IRecipe, Boolean>());
+        private final List<IRecipe> matches = new ArrayList<IRecipe>();
+        private final World world;
+        private int generatorIndex;
+        private boolean generated;
+        private int sampleIndex;
+        private int recipeIndex;
+        private int matchErrors;
+        private long checks;
 
-        List<?> rawRecipes = CraftingManager.getInstance().getRecipeList();
-        List<IRecipe> recipes = new ArrayList<IRecipe>();
-
-        for (Object object : rawRecipes) {
-            if (object instanceof IRecipe) {
-                recipes.add((IRecipe) object);
+        private ScanJob(MinecraftServer server) {
+            for (Object object : new ArrayList<Object>(CraftingManager.getInstance().getRecipeList())) {
+                if (object instanceof IRecipe) {
+                    recipeIndices.put((IRecipe) object, Integer.valueOf(recipes.size()));
+                    recipes.add((IRecipe) object);
+                }
             }
+            world = server != null && server.worldServers != null && server.worldServers.length > 0
+                ? server.worldServers[0] : null;
+            rules = new SnapshotMatcher.Rule[recipes.size()];
+            LOG.info("Incremental recipe scan started: {} recipes, {} ms/tick soft budget", recipes.size(), tickBudgetMillis);
         }
 
-        final Map<IRecipe, Integer> recipeIndices = new IdentityHashMap<IRecipe, Integer>();
-        for (int i = 0; i < recipes.size(); i++) {
-            recipeIndices.put(recipes.get(i), Integer.valueOf(i));
+        private String status() {
+            return !generated ? "Generating samples: " + generatorIndex + "/" + recipes.size()
+                + " recipes, " + samples.size() + " matrices."
+                : "Matching: " + sampleIndex + "/" + samples.size() + " matrices, recipe "
+                    + recipeIndex + "/" + (candidates == null ? 0 : candidates.length) + ", " + checks
+                    + " live checks, worker " + worker.matrices + "/" + samples.size() + " matrices, "
+                    + worker.checks + " background checks, " + groups.size() + " groups.";
         }
 
-        Map<String, ItemStack[]> samples = new LinkedHashMap<String, ItemStack[]>();
-        Set<String> unsupported = new LinkedHashSet<String>();
-
-        for (IRecipe recipe : recipes) {
-            List<ItemStack[]> generated = samplesFor(recipe);
-
-            if (generated.isEmpty()) {
-                unsupported.add(recipe.getClass().getName());
-                continue;
-            }
-
-            for (ItemStack[] sample : generated) {
-                samples.put(signature(sample), copyGrid(sample));
-            }
+        private void cancel() {
+            if (workerThread != null) workerThread.interrupt();
         }
 
-        World world = null;
-        if (server != null && server.worldServers != null && server.worldServers.length > 0) {
-            world = server.worldServers[0];
-        }
-
-        Map<String, ConflictGroup> groups = new LinkedHashMap<String, ConflictGroup>();
-        Set<IRecipe> conflictingRecipes = Collections.newSetFromMap(new IdentityHashMap<IRecipe, Boolean>());
-        int matchErrors = 0;
-
-        for (ItemStack[] sample : samples.values()) {
-            InventoryCrafting matrix = toMatrix(sample);
-            List<IRecipe> matches = new ArrayList<IRecipe>();
-
-            for (IRecipe recipe : recipes) {
-                try {
-                    if (recipe.matches(matrix, world)) {
-                        matches.add(recipe);
+        private boolean advance() {
+            long deadline = System.nanoTime() + tickBudgetMillis * 1000000L;
+            int work = 0;
+            int generators = 0;
+            do {
+                if (!generated) {
+                    if (generatorIndex < recipes.size()) {
+                        IRecipe recipe = recipes.get(generatorIndex++);
+                        try {
+                            rules[generatorIndex - 1] = snapshotRule(recipe);
+                            List<ItemStack[]> grids = samplesFor(recipe);
+                            if (grids.isEmpty()) unsupported.add(recipe.getClass().getName());
+                            for (ItemStack[] grid : grids) {
+                                String key = signature(grid);
+                                if (uniqueSamples.containsKey(key)) continue;
+                                if (samples.size() >= maxMatrices) {
+                                    warnings.add("INCOMPLETE: unique matrix limit reached (" + maxMatrices + ").");
+                                    generatorIndex = recipes.size();
+                                    break;
+                                }
+                                uniqueSamples.put(key, grid);
+                                samples.add(grid);
+                                long[] tokens = new long[9];
+                                for (int slot = 0; slot < 9; slot++) tokens[slot] = snapshotToken(grid[slot]);
+                                sampleTokens.add(tokens);
+                            }
+                        } catch (RuntimeException | LinkageError error) {
+                            unsupported.add(recipe.getClass().getName());
+                            warnings.add("Sample generation failed for #" + (generatorIndex - 1) + " " + recipe.getClass().getName());
+                            LOG.warn("Sample generation failed for " + recipe.getClass().getName(), error);
+                        }
+                        // Bound both the wall time and the number of recipe snapshots per tick.
+                        if (++generators >= 4) break;
+                        continue;
                     }
-                } catch (Throwable ignored) {
-                    matchErrors++;
+                    generated = true;
+                    uniqueSamples.clear();
+                    worker = new SnapshotMatcher(rules, sampleTokens);
+                    sampleTokens.clear();
+                    workerThread = new Thread(worker, "RecipeConflictScanner-worker");
+                    workerThread.setDaemon(true);
+                    workerThread.start();
+                    LOG.info("Generated {} matrices; worker thread filtering {} recipe pairs", samples.size(),
+                        (long) samples.size() * recipes.size());
                 }
-            }
-
-            if (matches.size() < 2) {
-                continue;
-            }
-
-            Collections.sort(matches, new Comparator<IRecipe>() {
-                @Override
-                public int compare(IRecipe a, IRecipe b) {
-                    return recipeIndices.get(a).intValue() - recipeIndices.get(b).intValue();
+                if (sampleIndex >= samples.size()) return true;
+                if (worker.failure != null) throw new IllegalStateException("Snapshot worker failed", worker.failure);
+                if (candidates == null) {
+                    candidates = worker.poll();
+                    if (candidates == null) {
+                        if (worker.done) {
+                            // The final put may have raced the first poll.
+                            candidates = worker.poll();
+                            if (candidates == null) throw new IllegalStateException("Snapshot worker stopped before all matrices were delivered");
+                        } else break; // Never wait for the worker on the server thread.
+                    }
                 }
-            });
-
-            StringBuilder groupKeyBuilder = new StringBuilder();
-
-            for (IRecipe recipe : matches) {
-                if (groupKeyBuilder.length() > 0) {
-                    groupKeyBuilder.append(',');
+                if (recipeIndex >= candidates.length) {
+                    if (matches.size() > 1) {
+                        StringBuilder key = new StringBuilder();
+                        for (IRecipe match : matches) key.append(recipeIndices.get(match)).append(',');
+                        if (!groups.containsKey(key.toString())) {
+                            groups.put(key.toString(), new ConflictGroup(samples.get(sampleIndex), matches, recipeIndices));
+                            conflicting.addAll(matches);
+                        }
+                    }
+                    sampleIndex++;
+                    recipeIndex = 0;
+                    candidates = null;
+                    matches.clear();
+                    continue;
                 }
-                groupKeyBuilder.append(recipeIndices.get(recipe));
+                int registeredIndex = candidates[recipeIndex++];
+                IRecipe recipe = recipes.get(registeredIndex);
+                if (!disabled.contains(recipe)) {
+                    long before = System.nanoTime();
+                    try {
+                        // Isolate a misbehaving recipe that mutates its test inventory.
+                        if (recipe.matches(toMatrix(samples.get(sampleIndex)), world)) matches.add(recipe);
+                    } catch (RuntimeException | LinkageError error) {
+                        matchErrors++;
+                        disabled.add(recipe);
+                        warnings.add("INCOMPLETE: matches() failed; skipped #" + registeredIndex + " " + recipe.getClass().getName());
+                        LOG.warn("Skipping failing recipe #" + registeredIndex + " " + recipe.getClass().getName(), error);
+                    }
+                    checks++;
+                    if (System.nanoTime() - before > 50000000L && disabled.add(recipe)) {
+                        warnings.add("INCOMPLETE: matches() exceeded 50ms; skipped remaining checks for #"
+                            + registeredIndex + " " + recipe.getClass().getName());
+                        LOG.warn("Slow matches() call (>50ms), skipping recipe #{} {}", registeredIndex, recipe.getClass().getName());
+                    }
+                }
+                work++;
+            } while (work < 2000 && System.nanoTime() < deadline);
+            if (System.currentTimeMillis() - lastProgress >= 5000L) {
+                LOG.info("Recipe scan progress: {}", status());
+                lastProgress = System.currentTimeMillis();
             }
-
-            String groupKey = groupKeyBuilder.toString();
-
-            if (!groups.containsKey(groupKey)) {
-                ConflictGroup group = new ConflictGroup(sample, matches, recipeIndices);
-                groups.put(groupKey, group);
-                conflictingRecipes.addAll(matches);
-            }
+            return false;
         }
 
-        List<ConflictGroup> conflicts = new ArrayList<ConflictGroup>(groups.values());
+        private ScanResult result() {
+            List<ConflictGroup> conflicts = new ArrayList<ConflictGroup>(groups.values());
+            Collections.sort(conflicts, new Comparator<ConflictGroup>() {
+                @Override
+                public int compare(ConflictGroup a, ConflictGroup b) { return b.recipes.size() - a.recipes.size(); }
+            });
+            return new ScanResult(recipes.size(), samples.size(), conflicts, conflicting.size(), unsupported,
+                matchErrors, System.currentTimeMillis() - started, warnings);
+        }
+    }
 
-        Collections.sort(conflicts, new Comparator<ConflictGroup>() {
-            @Override
-            public int compare(ConflictGroup a, ConflictGroup b) {
-                return b.recipes.size() - a.recipes.size();
-            }
-        });
+    private static long snapshotToken(ItemStack stack) {
+        return stack == null ? SnapshotMatcher.EMPTY
+            : SnapshotMatcher.token(Item.getIdFromItem(stack.getItem()), stack.getItemDamage());
+    }
 
-        return new ScanResult(
-            recipes.size(),
-            samples.size(),
-            conflicts,
-            conflictingRecipes.size(),
-            unsupported,
-            matchErrors,
-            System.currentTimeMillis() - started);
+    private static SnapshotMatcher.Rule snapshotRule(IRecipe recipe) {
+        Object[] input;
+        if (recipe.getClass() == ShapedRecipes.class) input = ((ShapedRecipes) recipe).recipeItems;
+        else if (recipe.getClass() == ShapelessRecipes.class) input = ((ShapelessRecipes) recipe).recipeItems.toArray();
+        else if (recipe.getClass() == ShapedOreRecipe.class) input = ((ShapedOreRecipe) recipe).getInput();
+        else if (recipe.getClass() == ShapelessOreRecipe.class) input = ((ShapelessOreRecipe) recipe).getInput().toArray();
+        else return null; // Includes subclasses with overridden matches().
+        int count = 0;
+        Set<Long> tokens = new HashSet<Long>();
+        for (Object ingredient : input) {
+            if (ingredient == null) continue;
+            count++;
+            if (ingredient instanceof ItemStack) tokens.add(Long.valueOf(snapshotToken((ItemStack) ingredient)));
+            else if (ingredient instanceof List) {
+                for (Object alternative : (List<?>) ingredient) {
+                    if (!(alternative instanceof ItemStack)) return null;
+                    tokens.add(Long.valueOf(snapshotToken((ItemStack) alternative)));
+                }
+            } else return null;
+        }
+        return new SnapshotMatcher.Rule(count, tokens);
     }
 
     private static InventoryCrafting toMatrix(ItemStack[] sample) {
@@ -300,6 +446,8 @@ public final class RecipeConflictScannerMod {
     }
 
     private static List<ItemStack[]> shapedSamples(Object[] input, int width, int height) {
+        if (input == null || width < 1 || width > 3 || height < 1 || height > 3
+            || input.length != width * height) return Collections.emptyList();
         List<List<ItemStack>> choices = choicesFor(input);
         List<ItemStack[]> combinations = cartesian(choices, MAX_SAMPLES_PER_RECIPE);
         List<ItemStack[]> result = new ArrayList<ItemStack[]>();
@@ -344,6 +492,7 @@ public final class RecipeConflictScannerMod {
     }
 
     private static List<ItemStack[]> shapelessSamples(Object[] input) {
+        if (input == null || input.length < 1 || input.length > 9) return Collections.emptyList();
         List<List<ItemStack>> choices = choicesFor(input);
         List<ItemStack[]> combinations = cartesian(choices, Math.max(1, MAX_SAMPLES_PER_RECIPE / 4));
         List<ItemStack[]> result = new ArrayList<ItemStack[]>();
@@ -557,6 +706,9 @@ public final class RecipeConflictScannerMod {
             writer.write("Recipes involved: " + result.conflictingRecipeCount + "\n");
             writer.write("IRecipe.matches() errors caught: " + result.matchErrors + "\n");
             writer.write("Scan time: " + result.elapsedMillis + " ms\n\n");
+            writer.write("Sampling limits: 24 alternatives/slot, 512 matrices/recipe; not exhaustive.\n");
+            for (String warning : result.warnings) writer.write(warning + "\n");
+            writer.write("\n");
 
             int conflictNumber = 1;
 
@@ -678,6 +830,7 @@ public final class RecipeConflictScannerMod {
         private final Set<String> unsupportedRecipeClasses;
         private final int matchErrors;
         private final long elapsedMillis;
+        private final Set<String> warnings;
 
         private ScanResult(
             int totalRecipes,
@@ -686,7 +839,8 @@ public final class RecipeConflictScannerMod {
             int conflictingRecipeCount,
             Set<String> unsupportedRecipeClasses,
             int matchErrors,
-            long elapsedMillis) {
+            long elapsedMillis,
+            Set<String> warnings) {
 
             this.totalRecipes = totalRecipes;
             this.generatedSamples = generatedSamples;
@@ -696,6 +850,7 @@ public final class RecipeConflictScannerMod {
                 Collections.unmodifiableSet(new LinkedHashSet<String>(unsupportedRecipeClasses));
             this.matchErrors = matchErrors;
             this.elapsedMillis = elapsedMillis;
+            this.warnings = new LinkedHashSet<String>(warnings);
         }
     }
 }

@@ -30,10 +30,12 @@ tasks.register('verifyServerJar') {
             assert new groovy.json.JsonSlurper().parseText(metadata)[0].version == project.version.toString()
             def classes = zip.entries().findAll { it.name.endsWith('.class') }
             assert !classes.isEmpty(): 'No mod classes in jar'
+            boolean remappedMatches = false
             classes.each { entry ->
                 byte[] bytes = zip.getInputStream(entry).bytes
                 assert ((bytes[6] & 255) << 8 | (bytes[7] & 255)) == 52: "Not Java 8: ${entry.name}"
                 def constants = new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1)
+                remappedMatches |= constants.contains('func_77569_a')
                 ['net/minecraft/client/', 'cpw/mods/fml/client/', 'org/lwjgl/'].each { forbidden ->
                     assert !constants.contains(forbidden): "Client dependency in ${entry.name}: ${forbidden}"
                 }
@@ -41,7 +43,7 @@ tasks.register('verifyServerJar') {
             def main = new String(zip.getInputStream(zip.getEntry(
                 'dev/frostey/recipeconflicts/RecipeConflictScannerMod.class')).bytes,
                 java.nio.charset.StandardCharsets.ISO_8859_1)
-            assert main.contains('func_77569_a'): 'IRecipe.matches was not reobfuscated'
+            assert remappedMatches: 'IRecipe.matches was not reobfuscated'
             assert main.contains('acceptableRemoteVersions')
         } finally {
             zip.close()

@@ -36,6 +36,13 @@ jobs:
       - name: List outputs
         run: find tools/RecipeConflictScanner/build/libs -maxdepth 1 -type f -printf '%f\n'
 
+      - name: Test snapshot worker isolation and cancellation
+        working-directory: tools/RecipeConflictScanner
+        run: |
+          mkdir -p build/snapshot-tests
+          "$JAVA_HOME_8_X64/bin/javac" -d build/snapshot-tests src/main/java/dev/frostey/recipeconflicts/SnapshotMatcher.java tests/SnapshotMatcherTest.java
+          "$JAVA_HOME_8_X64/bin/java" -cp build/snapshot-tests dev.frostey.recipeconflicts.SnapshotMatcherTest
+
       - name: Upload jar
         uses: actions/upload-artifact@v4
         with:
