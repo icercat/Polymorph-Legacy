@@ -42,12 +42,13 @@ import cpw.mods.fml.common.Mod.EventHandler;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartedEvent;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 @Mod(
     modid = RecipeConflictScannerMod.MODID,
     name = RecipeConflictScannerMod.NAME,
     version = RecipeConflictScannerMod.VERSION,
-    serverSideOnly = true,
     acceptableRemoteVersions = "*")
 public final class RecipeConflictScannerMod {
 
@@ -56,6 +57,7 @@ public final class RecipeConflictScannerMod {
     public static final String VERSION = Tags.VERSION;
 
     private static final Charset UTF8 = Charset.forName("UTF-8");
+    private static final Logger LOG = LogManager.getLogger(NAME);
     private static final int MAX_ALTERNATIVES_PER_SLOT = 24;
     private static final int MAX_SAMPLES_PER_RECIPE = 512;
 
@@ -77,7 +79,13 @@ public final class RecipeConflictScannerMod {
     @EventHandler
     public void serverStarted(FMLServerStartedEvent event) {
         ScanResult result = scan(FMLCommonHandler.instance().getMinecraftServerInstance());
-        writeReport(result);
+        if (writeReport(result)) {
+            LOG.info("Scanned {} recipes: {} conflict groups. Report: {}",
+                result.totalRecipes, result.conflicts.size(),
+                new File(reportDirectory, "conflicts.txt").getAbsolutePath());
+        } else {
+            LOG.error("Could not write recipe conflict report");
+        }
     }
 
     private static final class RecipeConflictsCommand extends CommandBase {

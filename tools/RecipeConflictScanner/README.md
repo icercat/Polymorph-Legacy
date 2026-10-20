@@ -6,8 +6,9 @@ Small diagnostic companion mod for ATM0 / Polymorph-Legacy.
 Put `RecipeConflictScanner-0.1.0-exp2.jar` in the dedicated Forge 1.7.10 server's
 `mods` directory. Clients do not need this mod. Polymorph-Legacy is not required.
 Uses Forge 10.13.4.1614 and Java 8 or a compatible GTNH runtime.
-The mod declares `serverSideOnly = true` and `acceptableRemoteVersions = "*"`;
-it registers no items, blocks, network channels, or client handlers.
+The mod declares `acceptableRemoteVersions = "*"` and performs scanning and command
+registration only in server lifecycle events. Forge 1.7.10 has no `serverSideOnly`
+member in `@Mod`. It registers no items, blocks, network channels, or client handlers.
 
 ## Build
 From this directory, run `gradle --no-daemon clean build` with Gradle 8.11.1,

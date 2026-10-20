@@ -42,7 +42,7 @@ tasks.register('verifyServerJar') {
                 'dev/frostey/recipeconflicts/RecipeConflictScannerMod.class')).bytes,
                 java.nio.charset.StandardCharsets.ISO_8859_1)
             assert main.contains('func_77569_a'): 'IRecipe.matches was not reobfuscated'
-            assert main.contains('serverSideOnly') && main.contains('acceptableRemoteVersions')
+            assert main.contains('acceptableRemoteVersions')
         } finally {
             zip.close()
         }
