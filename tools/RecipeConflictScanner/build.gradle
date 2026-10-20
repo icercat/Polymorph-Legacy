@@ -17,3 +17,38 @@ tasks.withType(JavaCompile).configureEach {
 tasks.named('jar') {
     includeEmptyDirs = false
 }
+
+// Inspect the deployable artifact, not the development jar.
+tasks.register('verifyServerJar') {
+    dependsOn 'reobfJar'
+    doLast {
+        def archive = tasks.named('reobfJar').get().archiveFile.get().asFile
+        def zip = new java.util.zip.ZipFile(archive)
+        try {
+            def metadata = zip.getInputStream(zip.getEntry('mcmod.info')).getText('UTF-8')
+            assert !metadata.contains('${'): 'Unexpanded mod metadata'
+            assert new groovy.json.JsonSlurper().parseText(metadata)[0].version == project.version.toString()
+            def classes = zip.entries().findAll { it.name.endsWith('.class') }
+            assert !classes.isEmpty(): 'No mod classes in jar'
+            classes.each { entry ->
+                byte[] bytes = zip.getInputStream(entry).bytes
+                assert ((bytes[6] & 255) << 8 | (bytes[7] & 255)) == 52: "Not Java 8: ${entry.name}"
+                def constants = new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1)
+                ['net/minecraft/client/', 'cpw/mods/fml/client/', 'org/lwjgl/'].each { forbidden ->
+                    assert !constants.contains(forbidden): "Client dependency in ${entry.name}: ${forbidden}"
+                }
+            }
+            def main = new String(zip.getInputStream(zip.getEntry(
+                'dev/frostey/recipeconflicts/RecipeConflictScannerMod.class')).bytes,
+                java.nio.charset.StandardCharsets.ISO_8859_1)
+            assert main.contains('func_77569_a'): 'IRecipe.matches was not reobfuscated'
+            assert main.contains('serverSideOnly') && main.contains('acceptableRemoteVersions')
+        } finally {
+            zip.close()
+        }
+        def digest = java.security.MessageDigest.getInstance('SHA-256').digest(archive.bytes).encodeHex()
+        new File(archive.parentFile, archive.name + '.sha256').text = "${digest}  ${archive.name}\n"
+        logger.lifecycle("Verified Java 8 server jar: ${archive.name} (SHA-256 ${digest})")
+    }
+}
+tasks.named('build') { dependsOn 'verifyServerJar' }

@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.lang.reflect.Field;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -46,12 +47,13 @@ import cpw.mods.fml.common.event.FMLServerStartingEvent;
     modid = RecipeConflictScannerMod.MODID,
     name = RecipeConflictScannerMod.NAME,
     version = RecipeConflictScannerMod.VERSION,
+    serverSideOnly = true,
     acceptableRemoteVersions = "*")
 public final class RecipeConflictScannerMod {
 
     public static final String MODID = "recipeconflictscanner";
     public static final String NAME = "Recipe Conflict Scanner";
-    public static final String VERSION = "0.1.0-exp1";
+    public static final String VERSION = Tags.VERSION;
 
     private static final Charset UTF8 = Charset.forName("UTF-8");
     private static final int MAX_ALTERNATIVES_PER_SLOT = 24;
@@ -246,7 +248,12 @@ public final class RecipeConflictScannerMod {
             ShapedOreRecipe shaped = (ShapedOreRecipe) recipe;
 
             try {
-                return shapedSamples(shaped.getInput(), shaped.getWidth(), shaped.getHeight());
+                // Forge 1.7.10 exposes getInput(), but has no getWidth()/getHeight().
+                Field width = ShapedOreRecipe.class.getDeclaredField("width");
+                Field height = ShapedOreRecipe.class.getDeclaredField("height");
+                width.setAccessible(true);
+                height.setAccessible(true);
+                return shapedSamples(shaped.getInput(), width.getInt(shaped), height.getInt(shaped));
             } catch (Throwable ignored) {
                 return guessedShapedOreSamples(shaped.getInput());
             }

@@ -16,11 +16,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up Java 8 toolchain and Java 21 build runtime
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: |
+            8
+            21
 
       - name: Install Gradle 8.11.1
         run: |
@@ -29,7 +31,7 @@ jobs:
 
       - name: Build
         working-directory: tools/RecipeConflictScanner
-        run: /opt/gradle-8.11.1/bin/gradle --no-daemon clean build
+        run: /opt/gradle-8.11.1/bin/gradle --no-daemon --console=plain clean build
 
       - name: List outputs
         run: find tools/RecipeConflictScanner/build/libs -maxdepth 1 -type f -printf '%f\n'
@@ -37,6 +39,8 @@ jobs:
       - name: Upload jar
         uses: actions/upload-artifact@v4
         with:
-          name: RecipeConflictScanner-0.1.0-exp1
-          path: tools/RecipeConflictScanner/build/libs/*.jar
+          name: RecipeConflictScanner-server
+          path: |
+            tools/RecipeConflictScanner/build/libs/*.jar
+            tools/RecipeConflictScanner/build/libs/*.sha256
           if-no-files-found: error
