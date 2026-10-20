@@ -1,0 +1,14 @@
+[
+  {
+    "modid": "recipeconflictscanner",
+    "name": "Recipe Conflict Scanner",
+    "description": "Diagnostic helper for Minecraft 1.7.10 that reports crafting recipe conflicts.",
+    "version": "${version}",
+    "mcversion": "1.7.10",
+    "authorList": ["Frostey", "OpenAI"],
+    "credits": "Built for ATM0 / Polymorph-Legacy diagnostics",
+    "logoFile": "",
+    "screenshots": [],
+    "dependencies": []
+  }
+]
